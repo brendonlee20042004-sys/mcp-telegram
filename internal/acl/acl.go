@@ -25,9 +25,10 @@ type PeerIdentity struct {
 }
 
 type compiledRule struct {
-	matcher func(PeerIdentity) bool
-	perms   map[config.Permission]bool
-	deny    bool
+	matcher        func(PeerIdentity) bool
+	perms          map[config.Permission]bool
+	deny           bool
+	requireConfirm bool
 }
 
 type Checker struct {
@@ -45,7 +46,12 @@ func NewChecker(cfg config.ACLConfig) (*Checker, error) {
 		for _, p := range chat.Permissions {
 			perms[p] = true
 		}
-		rules = append(rules, compiledRule{matcher: matcher, perms: perms, deny: chat.Deny})
+		rules = append(rules, compiledRule{
+			matcher:        matcher,
+			perms:          perms,
+			deny:           chat.Deny,
+			requireConfirm: chat.RequireConfirm,
+		})
 	}
 	return &Checker{rules: rules}, nil
 }
@@ -74,6 +80,28 @@ func (c *Checker) Allowed(peer PeerIdentity, perm config.Permission) bool {
 		granted = true
 	}
 	return granted
+}
+
+// RequiresConfirm reports whether any allow rule that grants this permission
+// to the peer is marked require_confirm: true. Only allow rules count —
+// require_confirm on a deny rule is meaningless. Used by destructive tools
+// to gate on an explicit confirmation token.
+func (c *Checker) RequiresConfirm(peer PeerIdentity, perm config.Permission) bool {
+	for _, rule := range c.rules {
+		if rule.deny {
+			continue
+		}
+		if !rule.matcher(peer) {
+			continue
+		}
+		if !rule.perms[perm] {
+			continue
+		}
+		if rule.requireConfirm {
+			return true
+		}
+	}
+	return false
 }
 
 // MatchesAny reports whether any allow rule matches the peer. Deny-only

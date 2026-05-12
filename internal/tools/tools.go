@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
@@ -119,6 +120,45 @@ func isPathUnder(path string, allowedDirs []string) bool {
 		}
 	}
 	return false
+}
+
+// expectedConfirmToken builds the exact string an LLM must echo back as the
+// confirm parameter for a destructive action on a confirm-protected chat.
+// The format is deliberately verbose so it shows up clearly in the LLM's
+// conversation log and in the audit trail.
+//
+//	send to @boss         -> "yes-send-to-@boss"
+//	forward to @ops       -> "yes-forward-to-@ops"
+//	draft on @boss        -> "yes-draft-in-@boss"
+//	mark @boss read       -> "yes-mark-read-@boss"
+func expectedConfirmToken(action, chatRef string) string {
+	return "yes-" + action + "-" + chatRef
+}
+
+// checkConfirm enforces the require_confirm policy for a destructive tool.
+// Returns nil if no confirmation is required or the supplied token matches;
+// otherwise returns a CallToolResult that instructs the LLM how to confirm.
+//
+// The error message includes the exact token to supply, so the LLM can
+// retry in the next turn after surfacing the confirmation to the user.
+func checkConfirm(
+	deps *Deps,
+	identity acl.PeerIdentity,
+	perm config.Permission,
+	chatRef string,
+	action string,
+	supplied string,
+) *mcp.CallToolResult {
+	if !deps.ACL.RequiresConfirm(identity, perm) {
+		return nil
+	}
+	expected := expectedConfirmToken(action, chatRef)
+	if supplied == expected {
+		return nil
+	}
+	return toolError(fmt.Sprintf(
+		"confirmation required for %s on %s — pass exactly: confirm=%q",
+		action, chatRef, expected))
 }
 
 // dryRunResult wraps a description as a successful CallToolResult prefixed
