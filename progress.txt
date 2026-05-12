@@ -23,19 +23,19 @@ Upstream baseline:
 ## Roadmap (priorities)
 
 ### High priority (production blockers)
-- [ ] Reconnect logic on Telegram disconnect (currently dies)
+- [x] Reconnect logic on Telegram disconnect       (PR #8, merged)
 - [ ] Approval middleware for destructive tools (send/forward/file upload)
-- [x] Audit log of every tool invocation (separate file, redacted)
-- [ ] Health-check tool (tg_health) returning client status
+- [x] Audit log of every tool invocation           (PR #3, merged)
+- [x] Health-check tool (tg_health)                (PR #4, merged)
 
 ### Medium priority (UX & safety)
 - [ ] QR-code login flow (alternative to phone+SMS)
 - [ ] Content scanner: flag prompt-injection / hidden unicode in incoming
       messages, mark output as untrusted via _meta annotations
 - [ ] Output annotations (_meta.from_user_data, trust_level, scan_findings)
-- [ ] Regex matchers in ACL (@news_*)
-- [ ] Inverse ACL rules (explicit deny overrides allow)
-- [ ] Dry-run flag for write tools (returns "would do X" without doing it)
+- [x] Regex matchers in ACL (@news_*, regex:...)   (PR #5, merged)
+- [x] Inverse ACL rules (explicit deny)            (PR #6, merged)
+- [x] Dry-run flag for write tools                 (PR #7, merged)
 - [ ] Per-chat send rate limit (already global, add per-peer)
 
 ### Low priority (nice to have)
