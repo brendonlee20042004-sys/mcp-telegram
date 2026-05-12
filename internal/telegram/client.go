@@ -197,4 +197,3 @@ func extractEntities(u tg.UpdatesClass) ([]tg.UserClass, []tg.ChatClass) {
 		return nil, nil
 	}
 }
-
