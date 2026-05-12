@@ -44,9 +44,9 @@ type Deps struct {
 	ACL       *acl.Checker
 	Limits    config.LimitsConfig
 	Media     config.MediaConfig
-	Audit     *audit.Logger            // nil disables audit logging
-	StartTime time.Time                // when the server started; zero hides uptime
-	Health    HealthSource             // nil falls back to ping-only health
+	Audit     *audit.Logger             // nil disables audit logging
+	StartTime time.Time                 // when the server started; zero hides uptime
+	Health    HealthSource              // nil falls back to ping-only health
 	PeerRL    *ratelimit.PerPeerLimiter // nil disables per-chat rate limiting
 }
 
