@@ -200,6 +200,7 @@ func runServe() {
 	}
 
 	limiter := ratelimit.New(cfg.Limits.Rate)
+	peerRL := ratelimit.NewPerPeer(cfg.Limits.SendPerChat.RequestsPerSecond, cfg.Limits.SendPerChat.Burst)
 
 	client := tgclient.New(cfg.Telegram, limiter)
 	logger.Info("connecting to Telegram...")
@@ -223,6 +224,8 @@ func runServe() {
 		Media:     cfg.Media,
 		Audit:     auditor,
 		StartTime: time.Now(),
+		Health:    client,
+		PeerRL:    peerRL,
 	}
 	tools.Register(server, deps)
 

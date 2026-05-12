@@ -22,6 +22,7 @@ type sendInput struct {
 	File    string `json:"file,omitempty" jsonschema:"Absolute path to a file to send"`
 	ReplyTo string `json:"reply_to,omitempty" jsonschema:"Message ID to reply to"`
 	DryRun  bool   `json:"dry_run,omitempty" jsonschema:"If true, validate and ACL-check the call but skip the actual Telegram RPC. Returns a description of what would happen. Useful for confirming an action before performing it."`
+	Confirm string `json:"confirm,omitempty" jsonschema:"Exact confirmation token required when sending to chats with require_confirm: true in the ACL. The server will tell you the exact token to supply if confirmation is required."`
 }
 
 func registerSend(server *mcp.Server, deps *Deps) {
@@ -61,6 +62,17 @@ func handleSend(ctx context.Context, deps *Deps, input sendInput) *mcp.CallToolR
 
 	if !deps.ACL.Allowed(identity, config.PermSend) {
 		return toolError(fmt.Sprintf("access denied: %s does not have 'send' permission", input.Chat))
+	}
+
+	if r := checkConfirm(deps, identity, config.PermSend, input.Chat, "send-to", input.Confirm); r != nil {
+		return r
+	}
+
+	// Per-chat rate limit: blocks here if the LLM has been sending to this
+	// chat too fast. Global rate limit already wraps every RPC, but this
+	// catches per-peer bursts that don't exhaust the global budget.
+	if err := deps.PeerRL.Wait(ctx, input.Chat); err != nil {
+		return toolError(fmt.Sprintf("per-chat rate limit: %v", err))
 	}
 
 	var replyTo tg.InputReplyToClass

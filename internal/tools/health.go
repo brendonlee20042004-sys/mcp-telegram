@@ -30,12 +30,28 @@ func registerHealth(server *mcp.Server, deps *Deps) {
 func handleHealth(ctx context.Context, deps *Deps) *mcp.CallToolResult {
 	var lines []string
 
-	// Connectivity: ping self via UsersGetUsers([InputUserSelf]).
-	// This goes through the rate limiter middleware so we can't accidentally
-	// hammer Telegram by polling health.
+	// Process-level connection state: tracked by the telegram client across
+	// reconnects (vs. a fresh ping which only sees this moment). Reported
+	// first so an operator can distinguish 'connection is up but slow' from
+	// 'we are mid-reconnect'.
+	transportConnected := true
+	if deps.Health != nil {
+		transportConnected = deps.Health.Connected()
+		if transportConnected {
+			lines = append(lines, "transport: connected")
+		} else {
+			lines = append(lines, "transport: disconnected (client is reconnecting)")
+		}
+	}
+
+	// Connectivity probe: ping self via UsersGetUsers([InputUserSelf]). Goes
+	// through the rate limiter middleware so a runaway health-checker can't
+	// hammer Telegram. Time it so the response includes RPC latency.
 	var account string
 	connected := false
+	pingStart := time.Now()
 	users, err := deps.API.UsersGetUsers(ctx, []tg.InputUserClass{&tg.InputUserSelf{}})
+	latency := time.Since(pingStart)
 	if err != nil {
 		lines = append(lines, fmt.Sprintf("status: error (telegram ping failed: %v)", err))
 	} else if len(users) > 0 {
@@ -52,6 +68,7 @@ func handleHealth(ctx context.Context, deps *Deps) *mcp.CallToolResult {
 	if connected {
 		lines = append(lines, "status: ok")
 		lines = append(lines, "account: "+account)
+		lines = append(lines, fmt.Sprintf("ping_latency_ms: %d", latency.Milliseconds()))
 	}
 
 	// Uptime — set when the server starts. Zero StartTime means uptime
@@ -77,8 +94,10 @@ func handleHealth(ctx context.Context, deps *Deps) *mcp.CallToolResult {
 	result := &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: strings.Join(lines, "\n")}},
 	}
-	if !connected {
-		// Surface as error so MCP clients can show the failure prominently.
+	// Surface as error if either signal indicates trouble. Connected means
+	// the ping just succeeded; transportConnected means the reconnect loop
+	// considers the connection alive across history. Both must hold.
+	if !connected || !transportConnected {
 		result.IsError = true
 	}
 	return result

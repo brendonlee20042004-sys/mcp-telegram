@@ -20,6 +20,12 @@ limits:
   rate:
     requests_per_second: 2.0
     burst: 3
+  # Optional: throttle destructive actions (send, forward, draft)
+  # per-chat. Useful to prevent an LLM stuck in a loop from spamming
+  # one person. Leave commented to disable (default).
+  # send_per_chat:
+  #   requests_per_second: 0.2  # one message every 5 seconds per chat
+  #   burst: 2
 
 media:
   # download: [photo, document, video, voice, audio]

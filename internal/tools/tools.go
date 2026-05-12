@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/Prgebish/mcp-telegram/internal/acl"
 	"github.com/Prgebish/mcp-telegram/internal/audit"
 	"github.com/Prgebish/mcp-telegram/internal/config"
+	"github.com/Prgebish/mcp-telegram/internal/ratelimit"
 	"github.com/gotd/td/tg"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -29,6 +31,12 @@ type PeerResolver interface {
 	ResolvePeerForTool(ctx context.Context, ref string) (Peer, acl.PeerIdentity, error)
 }
 
+// HealthSource exposes process-level connection metrics for tg_health.
+// Implemented by *telegram.Client; nil-safe in tg_health.
+type HealthSource interface {
+	Connected() bool
+}
+
 // Deps holds all dependencies for tool handlers.
 type Deps struct {
 	Resolver  PeerResolver
@@ -36,8 +44,10 @@ type Deps struct {
 	ACL       *acl.Checker
 	Limits    config.LimitsConfig
 	Media     config.MediaConfig
-	Audit     *audit.Logger // nil disables audit logging
-	StartTime time.Time     // when the server started; zero hides uptime
+	Audit     *audit.Logger            // nil disables audit logging
+	StartTime time.Time                // when the server started; zero hides uptime
+	Health    HealthSource             // nil falls back to ping-only health
+	PeerRL    *ratelimit.PerPeerLimiter // nil disables per-chat rate limiting
 }
 
 // recordAudit writes one entry to the audit log if configured. Extracts
@@ -119,6 +129,45 @@ func isPathUnder(path string, allowedDirs []string) bool {
 		}
 	}
 	return false
+}
+
+// expectedConfirmToken builds the exact string an LLM must echo back as the
+// confirm parameter for a destructive action on a confirm-protected chat.
+// The format is deliberately verbose so it shows up clearly in the LLM's
+// conversation log and in the audit trail.
+//
+//	send to @boss         -> "yes-send-to-@boss"
+//	forward to @ops       -> "yes-forward-to-@ops"
+//	draft on @boss        -> "yes-draft-in-@boss"
+//	mark @boss read       -> "yes-mark-read-@boss"
+func expectedConfirmToken(action, chatRef string) string {
+	return "yes-" + action + "-" + chatRef
+}
+
+// checkConfirm enforces the require_confirm policy for a destructive tool.
+// Returns nil if no confirmation is required or the supplied token matches;
+// otherwise returns a CallToolResult that instructs the LLM how to confirm.
+//
+// The error message includes the exact token to supply, so the LLM can
+// retry in the next turn after surfacing the confirmation to the user.
+func checkConfirm(
+	deps *Deps,
+	identity acl.PeerIdentity,
+	perm config.Permission,
+	chatRef string,
+	action string,
+	supplied string,
+) *mcp.CallToolResult {
+	if !deps.ACL.RequiresConfirm(identity, perm) {
+		return nil
+	}
+	expected := expectedConfirmToken(action, chatRef)
+	if supplied == expected {
+		return nil
+	}
+	return toolError(fmt.Sprintf(
+		"confirmation required for %s on %s — pass exactly: confirm=%q",
+		action, chatRef, expected))
 }
 
 // dryRunResult wraps a description as a successful CallToolResult prefixed

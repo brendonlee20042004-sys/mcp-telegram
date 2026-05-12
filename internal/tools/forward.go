@@ -18,6 +18,7 @@ type forwardInput struct {
 	ToChat     string `json:"to_chat" jsonschema:"required,Destination chat: @username, user:ID, chat:ID, or channel:ID"`
 	MessageIDs string `json:"message_ids" jsonschema:"required,Comma-separated message IDs to forward (e.g. 123,456,789)"`
 	DryRun     bool   `json:"dry_run,omitempty" jsonschema:"If true, validate and ACL-check but skip the actual forward. Returns a description of what would happen."`
+	Confirm    string `json:"confirm,omitempty" jsonschema:"Exact confirmation token required when the destination has require_confirm: true."`
 }
 
 func registerForward(server *mcp.Server, deps *Deps) {
@@ -62,6 +63,14 @@ func handleForward(ctx context.Context, deps *Deps, input forwardInput) *mcp.Cal
 	}
 	if !deps.ACL.Allowed(toIdentity, config.PermSend) {
 		return toolError(fmt.Sprintf("access denied: %s does not have 'send' permission", input.ToChat))
+	}
+
+	if r := checkConfirm(deps, toIdentity, config.PermSend, input.ToChat, "forward-to", input.Confirm); r != nil {
+		return r
+	}
+
+	if err := deps.PeerRL.Wait(ctx, input.ToChat); err != nil {
+		return toolError(fmt.Sprintf("per-chat rate limit: %v", err))
 	}
 
 	if input.DryRun {

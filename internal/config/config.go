@@ -33,6 +33,11 @@ type ChatRule struct {
 	// revoked, even if another rule grants them. Useful for carving out
 	// exceptions from broad allow patterns. Default false (allow rule).
 	Deny bool `yaml:"deny,omitempty"`
+	// RequireConfirm forces destructive tools (send/forward/draft/mark_read)
+	// to receive an exact confirmation token matching the action. Forces the
+	// LLM to verbalize what it is about to do; a human watching the session
+	// sees the explicit intent before the side effect.
+	RequireConfirm bool `yaml:"require_confirm,omitempty"`
 }
 
 type Permission string
@@ -48,6 +53,9 @@ type LimitsConfig struct {
 	MaxMessagesPerRequest int        `yaml:"max_messages_per_request"`
 	MaxDialogsPerRequest  int        `yaml:"max_dialogs_per_request"`
 	Rate                  RateConfig `yaml:"rate"`
+	// SendPerChat throttles destructive actions (send/forward/draft)
+	// independently for each chat. Defaults to disabled.
+	SendPerChat RateConfig `yaml:"send_per_chat"`
 }
 
 type RateConfig struct {
