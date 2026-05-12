@@ -2,6 +2,7 @@ package acl
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -81,8 +82,64 @@ func normalizePhone(phone string) string {
 	return b.String()
 }
 
+// globToRegex compiles a shell-like glob over Telegram usernames into a
+// case-insensitive anchored regular expression. Supported metacharacters:
+// '*' matches any sequence (including empty), '?' matches exactly one
+// character. All other regex specials are escaped.
+//
+// Telegram usernames are [a-zA-Z0-9_] only, so the metacharacters can never
+// collide with valid username content — no need for an escape syntax.
+func globToRegex(glob string) (*regexp.Regexp, error) {
+	var b strings.Builder
+	b.WriteString("(?i)^")
+	for _, r := range glob {
+		switch r {
+		case '*':
+			b.WriteString(".*")
+		case '?':
+			b.WriteString(".")
+		default:
+			b.WriteString(regexp.QuoteMeta(string(r)))
+		}
+	}
+	b.WriteString("$")
+	return regexp.Compile(b.String())
+}
+
 func compileMatcher(match string) (func(PeerIdentity) bool, error) {
 	switch {
+	// regex:<pattern> — full RE2 regex over Username, case-insensitive.
+	// Works for both Users and Channels (Chats have no username and never match).
+	case strings.HasPrefix(match, "regex:"):
+		pattern := match[len("regex:"):]
+		if pattern == "" {
+			return nil, fmt.Errorf("regex pattern is empty in %q", match)
+		}
+		re, err := regexp.Compile("(?i)" + pattern)
+		if err != nil {
+			return nil, fmt.Errorf("invalid regex in %q: %w", match, err)
+		}
+		return func(p PeerIdentity) bool {
+			if p.Username == "" {
+				return false
+			}
+			return re.MatchString(p.Username)
+		}, nil
+
+	// @<glob> — username glob with * (any) and ? (one char). Triggers when @
+	// match contains glob metacharacters; otherwise falls through to exact match.
+	case strings.HasPrefix(match, "@") && (strings.ContainsAny(match, "*?")):
+		re, err := globToRegex(match[1:])
+		if err != nil {
+			return nil, fmt.Errorf("invalid glob in %q: %w", match, err)
+		}
+		return func(p PeerIdentity) bool {
+			if p.Username == "" {
+				return false
+			}
+			return re.MatchString(p.Username)
+		}, nil
+
 	case strings.HasPrefix(match, "@"):
 		username := strings.ToLower(match[1:])
 		return func(p PeerIdentity) bool {

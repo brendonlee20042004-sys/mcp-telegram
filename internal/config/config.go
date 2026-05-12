@@ -239,7 +239,7 @@ func isValidMatch(m string) bool {
 	if strings.HasPrefix(m, "@") || strings.HasPrefix(m, "+") {
 		return len(m) > 1
 	}
-	for _, prefix := range []string{"user:", "chat:", "channel:"} {
+	for _, prefix := range []string{"user:", "chat:", "channel:", "regex:"} {
 		if strings.HasPrefix(m, prefix) {
 			return len(m) > len(prefix)
 		}
