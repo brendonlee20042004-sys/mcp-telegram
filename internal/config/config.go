@@ -29,6 +29,10 @@ type ACLConfig struct {
 type ChatRule struct {
 	Match       string       `yaml:"match"`
 	Permissions []Permission `yaml:"permissions"`
+	// Deny inverts the rule: matching peers have the listed permissions
+	// revoked, even if another rule grants them. Useful for carving out
+	// exceptions from broad allow patterns. Default false (allow rule).
+	Deny bool `yaml:"deny,omitempty"`
 }
 
 type Permission string

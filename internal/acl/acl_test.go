@@ -208,6 +208,91 @@ func TestNewChecker_InvalidID(t *testing.T) {
 	}
 }
 
+// --- deny / inverse rules ---
+
+func TestChecker_DenyOverridesAllow(t *testing.T) {
+	checker := mustNewChecker(t, []config.ChatRule{
+		{Match: "user:100", Permissions: []config.Permission{config.PermRead, config.PermSend}},
+		{Match: "user:100", Permissions: []config.Permission{config.PermSend}, Deny: true},
+	})
+	peer := PeerIdentity{Kind: KindUser, ID: 100}
+	if !checker.Allowed(peer, config.PermRead) {
+		t.Error("read should still be allowed")
+	}
+	if checker.Allowed(peer, config.PermSend) {
+		t.Error("send should be denied by explicit deny rule")
+	}
+}
+
+func TestChecker_DenyCarvesOutFromAllow(t *testing.T) {
+	// Common pattern: blanket allow on a peer set, carve out exceptions.
+	// (When stacked with the glob/regex feature, the same construction works
+	// with @news_* — see feat/acl-patterns.)
+	checker := mustNewChecker(t, []config.ChatRule{
+		{Match: "user:100", Permissions: []config.Permission{config.PermRead, config.PermSend}},
+		{Match: "user:100", Permissions: []config.Permission{config.PermSend}, Deny: true},
+	})
+	peer := PeerIdentity{Kind: KindUser, ID: 100}
+	if !checker.Allowed(peer, config.PermRead) {
+		t.Error("read should still be allowed (carve-out is only on send)")
+	}
+	if checker.Allowed(peer, config.PermSend) {
+		t.Error("send should be revoked")
+	}
+}
+
+func TestChecker_DenyOnlyDoesNotGrant(t *testing.T) {
+	// A deny rule alone never grants. Without an allow, peer has no
+	// permissions regardless of deny rule presence.
+	checker := mustNewChecker(t, []config.ChatRule{
+		{Match: "user:100", Permissions: []config.Permission{config.PermSend}, Deny: true},
+	})
+	peer := PeerIdentity{Kind: KindUser, ID: 100}
+	if checker.Allowed(peer, config.PermSend) {
+		t.Error("deny-only rule should not grant; default-deny applies")
+	}
+	if checker.Allowed(peer, config.PermRead) {
+		t.Error("unrelated perms should also remain denied")
+	}
+}
+
+func TestChecker_DenyOnlyHidesFromMatchesAny(t *testing.T) {
+	// MatchesAny is used by tg_dialogs/tg_search as a visibility filter.
+	// A peer that exists only in a deny rule shouldn't suddenly become visible.
+	checker := mustNewChecker(t, []config.ChatRule{
+		{Match: "user:666", Permissions: []config.Permission{config.PermSend}, Deny: true},
+	})
+	peer := PeerIdentity{Kind: KindUser, ID: 666}
+	if checker.MatchesAny(peer) {
+		t.Error("deny-only peer should not be visible in dialogs")
+	}
+}
+
+func TestChecker_DenyDifferentPermDoesNotAffect(t *testing.T) {
+	// Deny on 'send' must not affect 'read'.
+	checker := mustNewChecker(t, []config.ChatRule{
+		{Match: "user:100", Permissions: []config.Permission{config.PermRead}},
+		{Match: "user:100", Permissions: []config.Permission{config.PermSend}, Deny: true},
+	})
+	peer := PeerIdentity{Kind: KindUser, ID: 100}
+	if !checker.Allowed(peer, config.PermRead) {
+		t.Error("deny on 'send' should not affect 'read'")
+	}
+}
+
+func TestChecker_MultipleAllowsOneDeny(t *testing.T) {
+	// Even with multiple allow rules, a single matching deny revokes.
+	checker := mustNewChecker(t, []config.ChatRule{
+		{Match: "@alice", Permissions: []config.Permission{config.PermSend}},
+		{Match: "user:100", Permissions: []config.Permission{config.PermSend}},
+		{Match: "+79001234567", Permissions: []config.Permission{config.PermSend}, Deny: true},
+	})
+	peer := PeerIdentity{Kind: KindUser, ID: 100, Username: "alice", Phone: "+79001234567"}
+	if checker.Allowed(peer, config.PermSend) {
+		t.Error("one deny must override multiple allows")
+	}
+}
+
 func mustNewChecker(t *testing.T, chats []config.ChatRule) *Checker {
 	t.Helper()
 	c, err := NewChecker(config.ACLConfig{Chats: chats})

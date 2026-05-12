@@ -26,6 +26,7 @@ type PeerIdentity struct {
 type compiledRule struct {
 	matcher func(PeerIdentity) bool
 	perms   map[config.Permission]bool
+	deny    bool
 }
 
 type Checker struct {
@@ -43,26 +44,46 @@ func NewChecker(cfg config.ACLConfig) (*Checker, error) {
 		for _, p := range chat.Permissions {
 			perms[p] = true
 		}
-		rules = append(rules, compiledRule{matcher: matcher, perms: perms})
+		rules = append(rules, compiledRule{matcher: matcher, perms: perms, deny: chat.Deny})
 	}
 	return &Checker{rules: rules}, nil
 }
 
 // Allowed checks if peer has the given permission.
-// Permissions are merged across all matching rules — if any matching rule
-// grants the permission, it is allowed. This avoids shadowing when the same
-// peer is referenced by multiple matchers (@username, +phone, user:ID).
+//
+// Semantics:
+//   - Allow rules grant the listed permissions; multiple matching allow rules
+//     merge their permissions (no shadowing).
+//   - Deny rules revoke the listed permissions on match. A deny rule overrides
+//     any number of allow rules — explicit deny always wins.
+//
+// This lets a small ruleset express "@news_* can read, except @news_spam".
 func (c *Checker) Allowed(peer PeerIdentity, perm config.Permission) bool {
+	granted := false
 	for _, rule := range c.rules {
-		if rule.matcher(peer) && rule.perms[perm] {
-			return true
+		if !rule.matcher(peer) {
+			continue
 		}
+		if !rule.perms[perm] {
+			continue
+		}
+		if rule.deny {
+			return false
+		}
+		granted = true
 	}
-	return false
+	return granted
 }
 
+// MatchesAny reports whether any allow rule matches the peer. Deny-only
+// matches don't count: a peer that exists solely to be denied shouldn't
+// appear in dialog listings, search results, or anywhere else that uses
+// MatchesAny as a visibility filter.
 func (c *Checker) MatchesAny(peer PeerIdentity) bool {
 	for _, rule := range c.rules {
+		if rule.deny {
+			continue
+		}
 		if rule.matcher(peer) {
 			return true
 		}
