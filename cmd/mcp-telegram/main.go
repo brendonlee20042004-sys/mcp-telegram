@@ -223,6 +223,7 @@ func runServe() {
 		Media:     cfg.Media,
 		Audit:     auditor,
 		StartTime: time.Now(),
+		Health:    client,
 	}
 	tools.Register(server, deps)
 

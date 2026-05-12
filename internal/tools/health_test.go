@@ -93,6 +93,65 @@ func TestHandleHealth_ZeroStartTimeHidesUptime(t *testing.T) {
 	}
 }
 
+// fakeHealth lets tg_health tests set Connected() return value directly.
+type fakeHealth struct{ connected bool }
+
+func (f fakeHealth) Connected() bool { return f.connected }
+
+func TestHandleHealth_TransportConnected(t *testing.T) {
+	api := mockTgClient(func(_ context.Context, _ bin.Encoder, output bin.Decoder) error {
+		v := output.(*tg.UserClassVector)
+		v.Elems = []tg.UserClass{&tg.User{ID: 1, FirstName: "X", Username: "x"}}
+		return nil
+	})
+	deps := &Deps{API: api, Health: fakeHealth{connected: true}}
+	result := handleHealth(context.Background(), deps)
+	if result.IsError {
+		t.Fatalf("transport connected + ping ok: %s", resultText(result))
+	}
+	text := resultText(result)
+	if !strings.Contains(text, "transport: connected") {
+		t.Errorf("missing 'transport: connected': %s", text)
+	}
+	if !strings.Contains(text, "ping_latency_ms:") {
+		t.Errorf("missing ping_latency_ms: %s", text)
+	}
+}
+
+func TestHandleHealth_TransportDisconnected_SetsIsError(t *testing.T) {
+	// Ping might still succeed (returns from cache?) but transport says down.
+	// Should be reported as error because reconnect is in progress.
+	api := mockTgClient(func(_ context.Context, _ bin.Encoder, output bin.Decoder) error {
+		v := output.(*tg.UserClassVector)
+		v.Elems = []tg.UserClass{&tg.User{ID: 1, FirstName: "X", Username: "x"}}
+		return nil
+	})
+	deps := &Deps{API: api, Health: fakeHealth{connected: false}}
+	result := handleHealth(context.Background(), deps)
+	if !result.IsError {
+		t.Error("disconnected transport should mark result as error")
+	}
+	if !strings.Contains(resultText(result), "transport: disconnected") {
+		t.Errorf("expected 'transport: disconnected': %s", resultText(result))
+	}
+}
+
+func TestHandleHealth_NoHealthSourceSkipsTransportLine(t *testing.T) {
+	api := mockTgClient(func(_ context.Context, _ bin.Encoder, output bin.Decoder) error {
+		v := output.(*tg.UserClassVector)
+		v.Elems = []tg.UserClass{&tg.User{ID: 1, FirstName: "X", Username: "x"}}
+		return nil
+	})
+	deps := &Deps{API: api} // no Health
+	result := handleHealth(context.Background(), deps)
+	if result.IsError {
+		t.Errorf("no health source + good ping should succeed: %s", resultText(result))
+	}
+	if strings.Contains(resultText(result), "transport:") {
+		t.Errorf("transport line should be hidden when no Health source: %s", resultText(result))
+	}
+}
+
 func TestHandleHealth_EmptyUserFallsBackToError(t *testing.T) {
 	// UsersGetUsers returns empty UserEmpty — connection works but self is malformed.
 	// We treat this as "not connected" since we can't identify ourselves.

@@ -30,6 +30,12 @@ type PeerResolver interface {
 	ResolvePeerForTool(ctx context.Context, ref string) (Peer, acl.PeerIdentity, error)
 }
 
+// HealthSource exposes process-level connection metrics for tg_health.
+// Implemented by *telegram.Client; nil-safe in tg_health.
+type HealthSource interface {
+	Connected() bool
+}
+
 // Deps holds all dependencies for tool handlers.
 type Deps struct {
 	Resolver  PeerResolver
@@ -39,6 +45,7 @@ type Deps struct {
 	Media     config.MediaConfig
 	Audit     *audit.Logger // nil disables audit logging
 	StartTime time.Time     // when the server started; zero hides uptime
+	Health    HealthSource  // nil falls back to ping-only health
 }
 
 // recordAudit writes one entry to the audit log if configured. Extracts
