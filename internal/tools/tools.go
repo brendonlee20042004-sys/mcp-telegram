@@ -121,6 +121,17 @@ func isPathUnder(path string, allowedDirs []string) bool {
 	return false
 }
 
+// dryRunResult wraps a description as a successful CallToolResult prefixed
+// with "DRY-RUN:" so an LLM (and a human reading the audit log) can tell at
+// a glance that the action did not actually happen.
+func dryRunResult(description string) *mcp.CallToolResult {
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: "DRY-RUN: " + description},
+		},
+	}
+}
+
 func toolError(msg string) *mcp.CallToolResult {
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{

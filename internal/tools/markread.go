@@ -11,7 +11,8 @@ import (
 )
 
 type markReadInput struct {
-	Chat string `json:"chat" jsonschema:"required,Chat reference: @username, user:ID, chat:ID, or channel:ID"`
+	Chat   string `json:"chat" jsonschema:"required,Chat reference: @username, user:ID, chat:ID, or channel:ID"`
+	DryRun bool   `json:"dry_run,omitempty" jsonschema:"If true, validate and ACL-check but skip the actual mark-read RPC."`
 }
 
 func registerMarkRead(server *mcp.Server, deps *Deps) {
@@ -39,6 +40,10 @@ func handleMarkRead(ctx context.Context, deps *Deps, input markReadInput) *mcp.C
 
 	if !deps.ACL.Allowed(identity, config.PermMarkRead) {
 		return toolError(fmt.Sprintf("access denied: %s does not have 'mark_read' permission", input.Chat))
+	}
+
+	if input.DryRun {
+		return dryRunResult(fmt.Sprintf("would mark %s as read", input.Chat))
 	}
 
 	switch p := peer.(type) {
