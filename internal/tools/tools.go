@@ -4,8 +4,10 @@ import (
 	"context"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Prgebish/mcp-telegram/internal/acl"
+	"github.com/Prgebish/mcp-telegram/internal/audit"
 	"github.com/Prgebish/mcp-telegram/internal/config"
 	"github.com/gotd/td/tg"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -34,6 +36,36 @@ type Deps struct {
 	ACL      *acl.Checker
 	Limits   config.LimitsConfig
 	Media    config.MediaConfig
+	Audit    *audit.Logger // nil disables audit logging
+}
+
+// recordAudit writes one entry to the audit log if configured. Extracts
+// success/error from the CallToolResult so each tool only needs a single
+// deferred call at the top of its handler.
+func recordAudit(deps *Deps, toolName string, args any, started time.Time, result *mcp.CallToolResult) {
+	if deps == nil || deps.Audit == nil {
+		return
+	}
+	ok := result == nil || !result.IsError
+	var errMsg string
+	if !ok {
+		errMsg = firstText(result)
+	}
+	_ = deps.Audit.Log(toolName, args, ok, errMsg, time.Since(started))
+}
+
+// firstText extracts the leading text content from a result, used for
+// audit error messages. Returns empty if there is no text content.
+func firstText(r *mcp.CallToolResult) string {
+	if r == nil {
+		return ""
+	}
+	for _, c := range r.Content {
+		if tc, ok := c.(*mcp.TextContent); ok {
+			return tc.Text
+		}
+	}
+	return ""
 }
 
 func Register(server *mcp.Server, deps *Deps) {

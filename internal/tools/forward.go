@@ -6,6 +6,7 @@ import (
 	"math/rand/v2"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Prgebish/mcp-telegram/internal/config"
 	"github.com/gotd/td/tg"
@@ -27,7 +28,10 @@ func registerForward(server *mcp.Server, deps *Deps) {
 			DestructiveHint: ptrBool(true),
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input forwardInput) (*mcp.CallToolResult, any, error) {
-		return handleForward(ctx, deps, input), nil, nil
+		start := time.Now()
+		result := handleForward(ctx, deps, input)
+		recordAudit(deps, "tg_forward", input, start, result)
+		return result, nil, nil
 	})
 }
 

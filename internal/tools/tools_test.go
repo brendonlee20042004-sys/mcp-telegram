@@ -1,9 +1,16 @@
 package tools
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/Prgebish/mcp-telegram/internal/audit"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestToolError(t *testing.T) {
@@ -74,6 +81,65 @@ func TestIsPathUnder_SymlinkBypass(t *testing.T) {
 	}
 	if isPathUnder(leafLink, []string{allowed}) {
 		t.Error("symlink bypass: leaf symlink pointing outside should not be considered under allowed dir")
+	}
+}
+
+func TestRecordAudit_NilLoggerNoOp(t *testing.T) {
+	deps := &Deps{} // Audit is nil
+	// Must not panic.
+	recordAudit(deps, "tg_send", struct{ Chat string }{Chat: "@alice"}, time.Now(), nil)
+}
+
+func TestRecordAudit_NilDepsNoOp(t *testing.T) {
+	recordAudit(nil, "tg_send", nil, time.Now(), nil)
+}
+
+func TestRecordAudit_SuccessResult(t *testing.T) {
+	var buf bytes.Buffer
+	deps := &Deps{Audit: audit.NewWithWriter(&buf)}
+	result := &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: "Message sent to @alice"}},
+	}
+	recordAudit(deps, "tg_send", struct{ Chat string }{Chat: "@alice"}, time.Now(), result)
+
+	var rec audit.Record
+	if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &rec); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if rec.Tool != "tg_send" {
+		t.Errorf("tool = %q", rec.Tool)
+	}
+	if rec.Outcome != "ok" {
+		t.Errorf("outcome = %q, want ok", rec.Outcome)
+	}
+	if rec.Error != "" {
+		t.Errorf("error should be empty on success, got %q", rec.Error)
+	}
+}
+
+func TestRecordAudit_ErrorResult(t *testing.T) {
+	var buf bytes.Buffer
+	deps := &Deps{Audit: audit.NewWithWriter(&buf)}
+	result := toolError("access denied: @alice does not have 'send' permission")
+	recordAudit(deps, "tg_send", struct{ Chat string }{Chat: "@alice"}, time.Now(), result)
+
+	var rec audit.Record
+	_ = json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &rec)
+	if rec.Outcome != "error" {
+		t.Errorf("outcome = %q, want error", rec.Outcome)
+	}
+	if !strings.Contains(rec.Error, "access denied") {
+		t.Errorf("error = %q, want to contain 'access denied'", rec.Error)
+	}
+}
+
+func TestRecordAudit_NilResultIsOk(t *testing.T) {
+	// Some code paths may pass nil for "no result yet" — treat as success.
+	var buf bytes.Buffer
+	deps := &Deps{Audit: audit.NewWithWriter(&buf)}
+	recordAudit(deps, "tg_me", nil, time.Now(), nil)
+	if !strings.Contains(buf.String(), `"outcome":"ok"`) {
+		t.Errorf("nil result should be ok, got: %s", buf.String())
 	}
 }
 
