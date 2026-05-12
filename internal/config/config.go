@@ -29,6 +29,10 @@ type ACLConfig struct {
 type ChatRule struct {
 	Match       string       `yaml:"match"`
 	Permissions []Permission `yaml:"permissions"`
+	// Deny inverts the rule: matching peers have the listed permissions
+	// revoked, even if another rule grants them. Useful for carving out
+	// exceptions from broad allow patterns. Default false (allow rule).
+	Deny bool `yaml:"deny,omitempty"`
 }
 
 type Permission string
@@ -67,8 +71,9 @@ func (m *MediaConfig) ShouldDownload(mediaType string) bool {
 }
 
 type LoggingConfig struct {
-	Level string `yaml:"level"`
-	File  string `yaml:"file"`
+	Level     string `yaml:"level"`
+	File      string `yaml:"file"`
+	AuditFile string `yaml:"audit_file"`
 }
 
 // LoadTelegram loads only the telegram section from config.
@@ -146,6 +151,12 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Logging.Level == "" {
 		cfg.Logging.Level = "info"
+	}
+	if cfg.Logging.File != "" {
+		cfg.Logging.File = expandTilde(cfg.Logging.File)
+	}
+	if cfg.Logging.AuditFile != "" {
+		cfg.Logging.AuditFile = expandTilde(cfg.Logging.AuditFile)
 	}
 	if cfg.Media.Directory != "" {
 		cfg.Media.Directory = expandTilde(cfg.Media.Directory)
@@ -239,7 +250,7 @@ func isValidMatch(m string) bool {
 	if strings.HasPrefix(m, "@") || strings.HasPrefix(m, "+") {
 		return len(m) > 1
 	}
-	for _, prefix := range []string{"user:", "chat:", "channel:"} {
+	for _, prefix := range []string{"user:", "chat:", "channel:", "regex:"} {
 		if strings.HasPrefix(m, prefix) {
 			return len(m) > len(prefix)
 		}

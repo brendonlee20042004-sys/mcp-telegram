@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Prgebish/mcp-telegram/internal/config"
 	"github.com/gotd/td/telegram/uploader"
@@ -20,6 +21,7 @@ type sendInput struct {
 	Text    string `json:"text,omitempty" jsonschema:"Message text to send"`
 	File    string `json:"file,omitempty" jsonschema:"Absolute path to a file to send"`
 	ReplyTo string `json:"reply_to,omitempty" jsonschema:"Message ID to reply to"`
+	DryRun  bool   `json:"dry_run,omitempty" jsonschema:"If true, validate and ACL-check the call but skip the actual Telegram RPC. Returns a description of what would happen. Useful for confirming an action before performing it."`
 }
 
 func registerSend(server *mcp.Server, deps *Deps) {
@@ -31,7 +33,10 @@ func registerSend(server *mcp.Server, deps *Deps) {
 			DestructiveHint: ptrBool(true),
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input sendInput) (*mcp.CallToolResult, any, error) {
-		return handleSend(ctx, deps, input), nil, nil
+		start := time.Now()
+		result := handleSend(ctx, deps, input)
+		recordAudit(deps, "tg_send", input, start, result)
+		return result, nil, nil
 	})
 }
 
@@ -68,6 +73,12 @@ func handleSend(ctx context.Context, deps *Deps, input sendInput) *mcp.CallToolR
 		replyTo = &tg.InputReplyToMessage{ReplyToMsgID: replyToID}
 	}
 
+	// Dry-run: everything above is validation/ACL. Stop here without
+	// touching Telegram. Audit log still records the call (intent).
+	if input.DryRun {
+		return dryRunResult(describeSend(input, replyToID))
+	}
+
 	// Send file if provided.
 	if input.File != "" {
 		result, _, _ := sendFile(ctx, deps, peer, input, replyTo)
@@ -94,6 +105,32 @@ func handleSend(ctx context.Context, deps *Deps, input sendInput) *mcp.CallToolR
 			&mcp.TextContent{Text: result},
 		},
 	}
+}
+
+// describeSend returns a human-readable summary of what tg_send would do,
+// used by dry-run mode. Keeps the audit/output format consistent with the
+// real action's response text.
+func describeSend(input sendInput, replyToID int) string {
+	var parts []string
+	switch {
+	case input.File != "" && input.Text != "":
+		parts = append(parts, fmt.Sprintf("would send file %s with caption to %s",
+			filepath.Base(input.File), input.Chat))
+	case input.File != "":
+		parts = append(parts, fmt.Sprintf("would send file %s to %s",
+			filepath.Base(input.File), input.Chat))
+	default:
+		// Truncate text preview so dry-run output stays compact.
+		preview := input.Text
+		if len(preview) > 80 {
+			preview = preview[:77] + "..."
+		}
+		parts = append(parts, fmt.Sprintf("would send %q to %s", preview, input.Chat))
+	}
+	if replyToID > 0 {
+		parts = append(parts, fmt.Sprintf("as reply to message %d", replyToID))
+	}
+	return strings.Join(parts, " ")
 }
 
 func sendFile(ctx context.Context, deps *Deps, peer Peer, input sendInput, replyTo tg.InputReplyToClass) (*mcp.CallToolResult, any, error) {

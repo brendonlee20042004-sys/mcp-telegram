@@ -208,6 +208,234 @@ func TestNewChecker_InvalidID(t *testing.T) {
 	}
 }
 
+// --- pattern matchers (regex + glob) ---
+
+func TestChecker_GlobMatch(t *testing.T) {
+	checker := mustNewChecker(t, []config.ChatRule{
+		{Match: "@news_*", Permissions: []config.Permission{config.PermRead}},
+	})
+	for _, name := range []string{"news_tech", "news_world", "News_Sports"} {
+		peer := PeerIdentity{Kind: KindChannel, ID: 1, Username: name}
+		if !checker.Allowed(peer, config.PermRead) {
+			t.Errorf("@news_* should match %q", name)
+		}
+	}
+	for _, name := range []string{"tech_news", "newsletter", "alice"} {
+		peer := PeerIdentity{Kind: KindChannel, ID: 1, Username: name}
+		if checker.Allowed(peer, config.PermRead) {
+			t.Errorf("@news_* should NOT match %q", name)
+		}
+	}
+}
+
+func TestChecker_GlobQuestionMark(t *testing.T) {
+	checker := mustNewChecker(t, []config.ChatRule{
+		{Match: "@user?", Permissions: []config.Permission{config.PermRead}},
+	})
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{"user1", true},
+		{"userA", true},
+		{"user", false},   // ? requires exactly one
+		{"user12", false}, // too long
+	}
+	for _, tt := range tests {
+		peer := PeerIdentity{Kind: KindUser, ID: 1, Username: tt.name}
+		if got := checker.Allowed(peer, config.PermRead); got != tt.want {
+			t.Errorf("@user? matched %q = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestChecker_GlobNoMatchOnEmptyUsername(t *testing.T) {
+	checker := mustNewChecker(t, []config.ChatRule{
+		{Match: "@*", Permissions: []config.Permission{config.PermRead}},
+	})
+	// @* matches every non-empty username but never the empty one (Chat etc.)
+	noUsername := PeerIdentity{Kind: KindChat, ID: 1}
+	if checker.Allowed(noUsername, config.PermRead) {
+		t.Error("@* must not match peers without a username")
+	}
+	withUsername := PeerIdentity{Kind: KindUser, ID: 1, Username: "alice"}
+	if !checker.Allowed(withUsername, config.PermRead) {
+		t.Error("@* must match any username")
+	}
+}
+
+func TestChecker_RegexMatch(t *testing.T) {
+	checker := mustNewChecker(t, []config.ChatRule{
+		{Match: "regex:^news_(tech|world)$", Permissions: []config.Permission{config.PermRead}},
+	})
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{"news_tech", true},
+		{"news_world", true},
+		{"NEWS_TECH", true}, // (?i) case-insensitive
+		{"news_other", false},
+		{"my_news_tech", false}, // anchored
+	}
+	for _, tt := range tests {
+		peer := PeerIdentity{Kind: KindChannel, ID: 1, Username: tt.name}
+		if got := checker.Allowed(peer, config.PermRead); got != tt.want {
+			t.Errorf("regex matched %q = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestChecker_RegexNoMatchOnEmptyUsername(t *testing.T) {
+	checker := mustNewChecker(t, []config.ChatRule{
+		{Match: "regex:.*", Permissions: []config.Permission{config.PermRead}},
+	})
+	noUsername := PeerIdentity{Kind: KindChat, ID: 1}
+	if checker.Allowed(noUsername, config.PermRead) {
+		t.Error("regex must not match peers without a username")
+	}
+}
+
+func TestNewChecker_InvalidRegex(t *testing.T) {
+	_, err := NewChecker(config.ACLConfig{
+		Chats: []config.ChatRule{
+			{Match: "regex:[invalid(", Permissions: []config.Permission{config.PermRead}},
+		},
+	})
+	if err == nil {
+		t.Error("expected error for invalid regex")
+	}
+}
+
+func TestNewChecker_EmptyRegex(t *testing.T) {
+	_, err := NewChecker(config.ACLConfig{
+		Chats: []config.ChatRule{
+			{Match: "regex:", Permissions: []config.Permission{config.PermRead}},
+		},
+	})
+	if err == nil {
+		t.Error("expected error for empty regex pattern")
+	}
+}
+
+func TestChecker_GlobAndExactCoexist(t *testing.T) {
+	checker := mustNewChecker(t, []config.ChatRule{
+		{Match: "@alice", Permissions: []config.Permission{config.PermRead}},
+		{Match: "@news_*", Permissions: []config.Permission{config.PermRead, config.PermMarkRead}},
+	})
+	alice := PeerIdentity{Kind: KindUser, ID: 1, Username: "alice"}
+	if !checker.Allowed(alice, config.PermRead) {
+		t.Error("exact @alice rule should still work alongside glob rules")
+	}
+	if checker.Allowed(alice, config.PermMarkRead) {
+		t.Error("@alice should not match @news_*")
+	}
+	newsTech := PeerIdentity{Kind: KindChannel, ID: 2, Username: "news_tech"}
+	if !checker.Allowed(newsTech, config.PermMarkRead) {
+		t.Error("@news_tech should match @news_*")
+	}
+}
+
+func TestGlobToRegex_EscapesSpecials(t *testing.T) {
+	// Telegram usernames don't actually contain regex metacharacters,
+	// but verify defensive escaping anyway.
+	re, err := globToRegex(".+|()[]")
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if !re.MatchString(".+|()[]") {
+		t.Error("literal special characters should match themselves")
+	}
+	if re.MatchString("a") {
+		t.Error("literal pattern should not match arbitrary input")
+	}
+}
+
+// --- deny / inverse rules ---
+
+func TestChecker_DenyOverridesAllow(t *testing.T) {
+	checker := mustNewChecker(t, []config.ChatRule{
+		{Match: "user:100", Permissions: []config.Permission{config.PermRead, config.PermSend}},
+		{Match: "user:100", Permissions: []config.Permission{config.PermSend}, Deny: true},
+	})
+	peer := PeerIdentity{Kind: KindUser, ID: 100}
+	if !checker.Allowed(peer, config.PermRead) {
+		t.Error("read should still be allowed")
+	}
+	if checker.Allowed(peer, config.PermSend) {
+		t.Error("send should be denied by explicit deny rule")
+	}
+}
+
+func TestChecker_DenyCarvesOutFromAllow(t *testing.T) {
+	// Common pattern: blanket allow on a peer set, carve out exceptions.
+	// (When stacked with the glob/regex feature, the same construction works
+	// with @news_* — see feat/acl-patterns.)
+	checker := mustNewChecker(t, []config.ChatRule{
+		{Match: "user:100", Permissions: []config.Permission{config.PermRead, config.PermSend}},
+		{Match: "user:100", Permissions: []config.Permission{config.PermSend}, Deny: true},
+	})
+	peer := PeerIdentity{Kind: KindUser, ID: 100}
+	if !checker.Allowed(peer, config.PermRead) {
+		t.Error("read should still be allowed (carve-out is only on send)")
+	}
+	if checker.Allowed(peer, config.PermSend) {
+		t.Error("send should be revoked")
+	}
+}
+
+func TestChecker_DenyOnlyDoesNotGrant(t *testing.T) {
+	// A deny rule alone never grants. Without an allow, peer has no
+	// permissions regardless of deny rule presence.
+	checker := mustNewChecker(t, []config.ChatRule{
+		{Match: "user:100", Permissions: []config.Permission{config.PermSend}, Deny: true},
+	})
+	peer := PeerIdentity{Kind: KindUser, ID: 100}
+	if checker.Allowed(peer, config.PermSend) {
+		t.Error("deny-only rule should not grant; default-deny applies")
+	}
+	if checker.Allowed(peer, config.PermRead) {
+		t.Error("unrelated perms should also remain denied")
+	}
+}
+
+func TestChecker_DenyOnlyHidesFromMatchesAny(t *testing.T) {
+	// MatchesAny is used by tg_dialogs/tg_search as a visibility filter.
+	// A peer that exists only in a deny rule shouldn't suddenly become visible.
+	checker := mustNewChecker(t, []config.ChatRule{
+		{Match: "user:666", Permissions: []config.Permission{config.PermSend}, Deny: true},
+	})
+	peer := PeerIdentity{Kind: KindUser, ID: 666}
+	if checker.MatchesAny(peer) {
+		t.Error("deny-only peer should not be visible in dialogs")
+	}
+}
+
+func TestChecker_DenyDifferentPermDoesNotAffect(t *testing.T) {
+	// Deny on 'send' must not affect 'read'.
+	checker := mustNewChecker(t, []config.ChatRule{
+		{Match: "user:100", Permissions: []config.Permission{config.PermRead}},
+		{Match: "user:100", Permissions: []config.Permission{config.PermSend}, Deny: true},
+	})
+	peer := PeerIdentity{Kind: KindUser, ID: 100}
+	if !checker.Allowed(peer, config.PermRead) {
+		t.Error("deny on 'send' should not affect 'read'")
+	}
+}
+
+func TestChecker_MultipleAllowsOneDeny(t *testing.T) {
+	// Even with multiple allow rules, a single matching deny revokes.
+	checker := mustNewChecker(t, []config.ChatRule{
+		{Match: "@alice", Permissions: []config.Permission{config.PermSend}},
+		{Match: "user:100", Permissions: []config.Permission{config.PermSend}},
+		{Match: "+79001234567", Permissions: []config.Permission{config.PermSend}, Deny: true},
+	})
+	peer := PeerIdentity{Kind: KindUser, ID: 100, Username: "alice", Phone: "+79001234567"}
+	if checker.Allowed(peer, config.PermSend) {
+		t.Error("one deny must override multiple allows")
+	}
+}
+
 func mustNewChecker(t *testing.T, chats []config.ChatRule) *Checker {
 	t.Helper()
 	c, err := NewChecker(config.ACLConfig{Chats: chats})

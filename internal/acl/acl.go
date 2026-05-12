@@ -2,6 +2,7 @@ package acl
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -26,6 +27,7 @@ type PeerIdentity struct {
 type compiledRule struct {
 	matcher func(PeerIdentity) bool
 	perms   map[config.Permission]bool
+	deny    bool
 }
 
 type Checker struct {
@@ -43,26 +45,46 @@ func NewChecker(cfg config.ACLConfig) (*Checker, error) {
 		for _, p := range chat.Permissions {
 			perms[p] = true
 		}
-		rules = append(rules, compiledRule{matcher: matcher, perms: perms})
+		rules = append(rules, compiledRule{matcher: matcher, perms: perms, deny: chat.Deny})
 	}
 	return &Checker{rules: rules}, nil
 }
 
 // Allowed checks if peer has the given permission.
-// Permissions are merged across all matching rules — if any matching rule
-// grants the permission, it is allowed. This avoids shadowing when the same
-// peer is referenced by multiple matchers (@username, +phone, user:ID).
+//
+// Semantics:
+//   - Allow rules grant the listed permissions; multiple matching allow rules
+//     merge their permissions (no shadowing).
+//   - Deny rules revoke the listed permissions on match. A deny rule overrides
+//     any number of allow rules — explicit deny always wins.
+//
+// This lets a small ruleset express "@news_* can read, except @news_spam".
 func (c *Checker) Allowed(peer PeerIdentity, perm config.Permission) bool {
+	granted := false
 	for _, rule := range c.rules {
-		if rule.matcher(peer) && rule.perms[perm] {
-			return true
+		if !rule.matcher(peer) {
+			continue
 		}
+		if !rule.perms[perm] {
+			continue
+		}
+		if rule.deny {
+			return false
+		}
+		granted = true
 	}
-	return false
+	return granted
 }
 
+// MatchesAny reports whether any allow rule matches the peer. Deny-only
+// matches don't count: a peer that exists solely to be denied shouldn't
+// appear in dialog listings, search results, or anywhere else that uses
+// MatchesAny as a visibility filter.
 func (c *Checker) MatchesAny(peer PeerIdentity) bool {
 	for _, rule := range c.rules {
+		if rule.deny {
+			continue
+		}
 		if rule.matcher(peer) {
 			return true
 		}
@@ -81,8 +103,64 @@ func normalizePhone(phone string) string {
 	return b.String()
 }
 
+// globToRegex compiles a shell-like glob over Telegram usernames into a
+// case-insensitive anchored regular expression. Supported metacharacters:
+// '*' matches any sequence (including empty), '?' matches exactly one
+// character. All other regex specials are escaped.
+//
+// Telegram usernames are [a-zA-Z0-9_] only, so the metacharacters can never
+// collide with valid username content — no need for an escape syntax.
+func globToRegex(glob string) (*regexp.Regexp, error) {
+	var b strings.Builder
+	b.WriteString("(?i)^")
+	for _, r := range glob {
+		switch r {
+		case '*':
+			b.WriteString(".*")
+		case '?':
+			b.WriteString(".")
+		default:
+			b.WriteString(regexp.QuoteMeta(string(r)))
+		}
+	}
+	b.WriteString("$")
+	return regexp.Compile(b.String())
+}
+
 func compileMatcher(match string) (func(PeerIdentity) bool, error) {
 	switch {
+	// regex:<pattern> — full RE2 regex over Username, case-insensitive.
+	// Works for both Users and Channels (Chats have no username and never match).
+	case strings.HasPrefix(match, "regex:"):
+		pattern := match[len("regex:"):]
+		if pattern == "" {
+			return nil, fmt.Errorf("regex pattern is empty in %q", match)
+		}
+		re, err := regexp.Compile("(?i)" + pattern)
+		if err != nil {
+			return nil, fmt.Errorf("invalid regex in %q: %w", match, err)
+		}
+		return func(p PeerIdentity) bool {
+			if p.Username == "" {
+				return false
+			}
+			return re.MatchString(p.Username)
+		}, nil
+
+	// @<glob> — username glob with * (any) and ? (one char). Triggers when @
+	// match contains glob metacharacters; otherwise falls through to exact match.
+	case strings.HasPrefix(match, "@") && (strings.ContainsAny(match, "*?")):
+		re, err := globToRegex(match[1:])
+		if err != nil {
+			return nil, fmt.Errorf("invalid glob in %q: %w", match, err)
+		}
+		return func(p PeerIdentity) bool {
+			if p.Username == "" {
+				return false
+			}
+			return re.MatchString(p.Username)
+		}, nil
+
 	case strings.HasPrefix(match, "@"):
 		username := strings.ToLower(match[1:])
 		return func(p PeerIdentity) bool {

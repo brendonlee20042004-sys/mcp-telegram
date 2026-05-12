@@ -3,10 +3,12 @@ package telegram
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/Prgebish/mcp-telegram/internal/config"
 	"github.com/Prgebish/mcp-telegram/internal/ratelimit"
@@ -17,16 +19,18 @@ import (
 )
 
 type Client struct {
-	cfg     config.TelegramConfig
-	limiter *ratelimit.Limiter
-	tg      *telegram.Client
-	api     *tg.Client
-	peers   *peers.Manager
-	ready   chan struct{}
-	done    chan struct{}
-	err     error
-	cancel  context.CancelFunc
-	mu      sync.Mutex
+	cfg       config.TelegramConfig
+	limiter   *ratelimit.Limiter
+	tg        *telegram.Client
+	api       *tg.Client
+	peers     *peers.Manager
+	ready     chan struct{}
+	readyOnce sync.Once
+	done      chan struct{}
+	err       error
+	cancel    context.CancelFunc
+	mu        sync.Mutex
+	connected atomic.Bool
 }
 
 func New(cfg config.TelegramConfig, limiter *ratelimit.Limiter) *Client {
@@ -36,6 +40,12 @@ func New(cfg config.TelegramConfig, limiter *ratelimit.Limiter) *Client {
 		ready:   make(chan struct{}),
 		done:    make(chan struct{}),
 	}
+}
+
+// Connected reports whether the Telegram connection is currently live.
+// False during reconnect backoff or before the first successful connect.
+func (c *Client) Connected() bool {
+	return c.connected.Load()
 }
 
 func (c *Client) Start(ctx context.Context) error {
@@ -79,9 +89,16 @@ func (c *Client) Start(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	c.cancel = cancel
 
-	go func() {
-		defer close(c.done)
-		runErr := c.tg.Run(runCtx, func(ctx context.Context) error {
+	// One iteration of the connection lifecycle. retryRun calls this in a
+	// loop; if it returns a non-context error, the loop sleeps with backoff
+	// and tries again. ctx cancellation propagates through to terminate
+	// gotd's Run call.
+	runOnce := func(rctx context.Context) error {
+		// Mark disconnected as soon as the Run lifecycle ends, regardless of
+		// outcome. Reconnect attempts will flip this back to true inside the
+		// callback below.
+		defer c.connected.Store(false)
+		return c.tg.Run(rctx, func(ctx context.Context) error {
 			api := c.tg.API()
 			peerManager := peers.Options{}.Build(api)
 			pmRef.Store(peerManager)
@@ -98,15 +115,32 @@ func (c *Client) Start(ctx context.Context) error {
 			c.api = api
 			c.peers = peerManager
 			c.mu.Unlock()
+			c.connected.Store(true)
 
-			close(c.ready)
+			// Signal ready exactly once. On reconnect, ready is already
+			// closed and callers don't need a fresh signal — they already
+			// hold the API/Peers references and will see Connected() flip.
+			c.readyOnce.Do(func() { close(c.ready) })
 			c.enforceSessionPermissions()
+
 			<-ctx.Done()
 			return ctx.Err()
 		})
-		if runErr != nil && runErr != context.Canceled {
+	}
+
+	onReconnect := func(err error, backoff time.Duration) {
+		slog.Warn("telegram client disconnected, will reconnect",
+			"error", err, "backoff", backoff)
+	}
+
+	go func() {
+		defer close(c.done)
+		err := retryRun(runCtx, runOnce, sleepCtx, onReconnect,
+			defaultInitialBackoff, defaultMaxBackoff)
+		c.connected.Store(false)
+		if err != nil && err != context.Canceled {
 			c.mu.Lock()
-			c.err = runErr
+			c.err = err
 			c.mu.Unlock()
 		}
 	}()

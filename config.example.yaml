@@ -31,3 +31,8 @@ media:
 logging:
   level: info
   file: ""
+  # JSONL audit trail of every destructive tool invocation
+  # (tg_send, tg_forward, tg_draft, tg_mark_read).
+  # File is created with 0600 permissions; long fields are truncated.
+  # Leave empty to disable.
+  audit_file: ~/.config/mcp-telegram/audit.log

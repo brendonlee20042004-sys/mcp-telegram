@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/Prgebish/mcp-telegram/internal/config"
 	"github.com/gotd/td/tg"
@@ -10,8 +11,9 @@ import (
 )
 
 type draftInput struct {
-	Chat string `json:"chat" jsonschema:"required,Chat reference: @username, user:ID, chat:ID, or channel:ID"`
-	Text string `json:"text" jsonschema:"required,Draft message text"`
+	Chat   string `json:"chat" jsonschema:"required,Chat reference: @username, user:ID, chat:ID, or channel:ID"`
+	Text   string `json:"text" jsonschema:"required,Draft message text"`
+	DryRun bool   `json:"dry_run,omitempty" jsonschema:"If true, validate and ACL-check but skip actually saving the draft."`
 }
 
 func registerDraft(server *mcp.Server, deps *Deps) {
@@ -24,7 +26,10 @@ func registerDraft(server *mcp.Server, deps *Deps) {
 			IdempotentHint:  true,
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input draftInput) (*mcp.CallToolResult, any, error) {
-		return handleDraft(ctx, deps, input), nil, nil
+		start := time.Now()
+		result := handleDraft(ctx, deps, input)
+		recordAudit(deps, "tg_draft", input, start, result)
+		return result, nil, nil
 	})
 }
 
@@ -36,6 +41,10 @@ func handleDraft(ctx context.Context, deps *Deps, input draftInput) *mcp.CallToo
 
 	if !deps.ACL.Allowed(identity, config.PermDraft) {
 		return toolError(fmt.Sprintf("access denied: %s does not have 'draft' permission", input.Chat))
+	}
+
+	if input.DryRun {
+		return dryRunResult(fmt.Sprintf("would save draft in %s", input.Chat))
 	}
 
 	_, err = deps.API.MessagesSaveDraft(ctx, &tg.MessagesSaveDraftRequest{
