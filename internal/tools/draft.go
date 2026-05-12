@@ -11,8 +11,9 @@ import (
 )
 
 type draftInput struct {
-	Chat string `json:"chat" jsonschema:"required,Chat reference: @username, user:ID, chat:ID, or channel:ID"`
-	Text string `json:"text" jsonschema:"required,Draft message text"`
+	Chat   string `json:"chat" jsonschema:"required,Chat reference: @username, user:ID, chat:ID, or channel:ID"`
+	Text   string `json:"text" jsonschema:"required,Draft message text"`
+	DryRun bool   `json:"dry_run,omitempty" jsonschema:"If true, validate and ACL-check but skip actually saving the draft."`
 }
 
 func registerDraft(server *mcp.Server, deps *Deps) {
@@ -40,6 +41,10 @@ func handleDraft(ctx context.Context, deps *Deps, input draftInput) *mcp.CallToo
 
 	if !deps.ACL.Allowed(identity, config.PermDraft) {
 		return toolError(fmt.Sprintf("access denied: %s does not have 'draft' permission", input.Chat))
+	}
+
+	if input.DryRun {
+		return dryRunResult(fmt.Sprintf("would save draft in %s", input.Chat))
 	}
 
 	_, err = deps.API.MessagesSaveDraft(ctx, &tg.MessagesSaveDraftRequest{
