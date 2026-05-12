@@ -1,0 +1,82 @@
+# mcp-telegram — fork progress
+
+This is a fork of github.com/Prgebish/mcp-telegram with additional features
+focused on safety, observability and operational robustness.
+
+## Status
+
+- Forked: 2026-05-12
+- Upstream: github.com/Prgebish/mcp-telegram (MIT)
+- Fork:     github.com/brendonlee20042004-sys/mcp-telegram
+
+Upstream baseline:
+- Go 1.26 + gotd/td + official MCP Go SDK
+- 8 tools: tg_me, tg_dialogs, tg_history, tg_search,
+           tg_send, tg_forward, tg_draft, tg_mark_read
+- Default-deny ACL (per-chat permissions: read, send, draft, mark_read)
+- Token bucket rate-limiter on every MTProto RPC
+- Symlink-aware filesystem boundary for upload/download
+- Lazy peer resolution (no FLOOD_WAIT at startup)
+- Session file 0600
+- ~4300 LoC, full test coverage on every package
+
+## Roadmap (priorities)
+
+### High priority (production blockers)
+- [ ] Reconnect logic on Telegram disconnect (currently dies)
+- [ ] Approval middleware for destructive tools (send/forward/file upload)
+- [ ] Audit log of all tool invocations (separate file, redacted)
+- [ ] Health-check tool (tg_health) returning client status
+
+### Medium priority (UX & safety)
+- [ ] QR-code login flow (alternative to phone+SMS)
+- [ ] Content scanner: flag prompt-injection / hidden unicode in incoming
+      messages, mark output as untrusted via _meta annotations
+- [ ] Output annotations (_meta.from_user_data, trust_level, scan_findings)
+- [ ] Regex matchers in ACL (@news_*)
+- [ ] Inverse ACL rules (explicit deny overrides allow)
+- [ ] Dry-run flag for write tools (returns "would do X" without doing it)
+- [ ] Per-chat send rate limit (already global, add per-peer)
+
+### Low priority (nice to have)
+- [ ] Local SQLite cache + FTS5 for offline history search
+- [ ] Capability tokens with TTL for high-risk chats (boss, finance)
+- [ ] Multi-account support (account: <name> in config + ACL rules)
+- [ ] Per-account proxy (SOCKS5, MTProxy)
+- [ ] Stories / reactions / channel analytics tools
+- [ ] tg_get_message (single message by ID)
+- [ ] tg_get_replies (thread replies)
+- [ ] tg_extract_links (mentions, urls, emails from posts)
+- [ ] tg_discover_related_channels (analyze forwards)
+
+## Current sprint
+
+Sprint 0: setup
+- [x] Fork repo
+- [x] Clone, configure remote, branch feature/enhancements
+- [x] Verify build & tests green
+- [x] Extend CI to run on feature branches
+- [x] Document roadmap in progress.txt
+- [ ] Create issues on GitHub for each roadmap item
+- [ ] Live test: get api_id/api_hash, run auth, run serve
+- [ ] First small PR (placeholder feature: tg_get_message)
+
+## Verification commands
+
+After every change:
+
+    go build ./...
+    go test ./... -race
+    go vet ./...
+
+## Decisions log
+
+2026-05-12  Forked from upstream commit (clone time). Decided to fork
+            rather than write from scratch because upstream already has
+            the right architectural foundations (compiled ACL closures,
+            rate-limit middleware, typed peers, symlink-aware fs boundary).
+            Building on this saves ~2 months of foundational work.
+
+2026-05-12  CI extended from main-only to feat/**, fix/**, feature/**
+            push triggers + all PRs. We need fast feedback on every
+            feature branch.
