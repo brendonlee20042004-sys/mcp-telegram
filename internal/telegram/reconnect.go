@@ -55,6 +55,17 @@ func computeNextBackoff(prev, max time.Duration, jitterRoll float64) time.Durati
 // onReconnect is invoked between attempts so callers can log or update state;
 // it receives the most recent runFn error and the backoff duration that is
 // about to be slept through. May be nil.
+//
+// Relationship to gotd's internal reconnect:
+// gotd's telegram.Client.Run already wraps a reconnectUntilClosed loop with
+// exponential backoff at the transport level — most disconnect events
+// (network blips, server-side connection cycling) are handled silently by
+// gotd and never surface here. retryRun catches the *remaining* failure
+// modes: errors gotd considers permanent (e.g. key fingerprint mismatch)
+// and errors the callback returns when post-connection setup fails (e.g.
+// peers.Manager.Init failing after a fresh connect). Without this outer
+// layer, those errors would bubble all the way out of Run and end the
+// server. With it, the server survives a wider range of failures.
 func retryRun(
 	ctx context.Context,
 	runFn func(context.Context) error,
