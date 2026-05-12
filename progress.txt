@@ -44,7 +44,7 @@ Upstream baseline:
 - [ ] Multi-account support (account: <name> in config + ACL rules)
 - [ ] Per-account proxy (SOCKS5, MTProxy)
 - [ ] Stories / reactions / channel analytics tools
-- [ ] tg_get_message (single message by ID)
+- [x] tg_get_message (single message by ID)
 - [ ] tg_get_replies (thread replies)
 - [ ] tg_extract_links (mentions, urls, emails from posts)
 - [ ] tg_discover_related_channels (analyze forwards)
@@ -57,9 +57,10 @@ Sprint 0: setup
 - [x] Verify build & tests green
 - [x] Extend CI to run on feature branches
 - [x] Document roadmap in progress.txt
-- [ ] Create issues on GitHub for each roadmap item
+- [x] Open GitHub roadmap meta-issue (#1)
 - [ ] Live test: get api_id/api_hash, run auth, run serve
-- [ ] First small PR (placeholder feature: tg_get_message)
+       (blocked: Telegram refuses api_id for accounts <24h old)
+- [x] First small feature: tg_get_message (branch feat/get-message)
 
 ## Verification commands
 
