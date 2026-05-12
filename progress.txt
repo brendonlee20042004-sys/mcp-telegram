@@ -25,7 +25,7 @@ Upstream baseline:
 ### High priority (production blockers)
 - [ ] Reconnect logic on Telegram disconnect (currently dies)
 - [ ] Approval middleware for destructive tools (send/forward/file upload)
-- [ ] Audit log of all tool invocations (separate file, redacted)
+- [x] Audit log of every tool invocation (separate file, redacted)
 - [ ] Health-check tool (tg_health) returning client status
 
 ### Medium priority (UX & safety)
