@@ -1,9 +1,17 @@
 name: CI
 
+# Auto-trigger on push/PR is disabled until the GitHub Actions
+# billing flag on this fork's owner account is cleared. Until then,
+# every run fails immediately with "account is locked" and spams the
+# inbox. Once unblocked, restore by uncommenting the push/pull_request
+# blocks below.
+#
+# on:
+#   push:
+#     branches: [main, "feat/**", "fix/**", "feature/**"]
+#   pull_request:
 on:
-  push:
-    branches: [main, "feat/**", "fix/**", "feature/**"]
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   build:
