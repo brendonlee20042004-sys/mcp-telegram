@@ -53,6 +53,9 @@ type LimitsConfig struct {
 	MaxMessagesPerRequest int        `yaml:"max_messages_per_request"`
 	MaxDialogsPerRequest  int        `yaml:"max_dialogs_per_request"`
 	Rate                  RateConfig `yaml:"rate"`
+	// SendPerChat throttles destructive actions (send/forward/draft)
+	// independently for each chat. Defaults to disabled.
+	SendPerChat RateConfig `yaml:"send_per_chat"`
 }
 
 type RateConfig struct {

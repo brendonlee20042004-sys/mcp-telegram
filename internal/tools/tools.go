@@ -10,6 +10,7 @@ import (
 	"github.com/Prgebish/mcp-telegram/internal/acl"
 	"github.com/Prgebish/mcp-telegram/internal/audit"
 	"github.com/Prgebish/mcp-telegram/internal/config"
+	"github.com/Prgebish/mcp-telegram/internal/ratelimit"
 	"github.com/gotd/td/tg"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -43,9 +44,10 @@ type Deps struct {
 	ACL       *acl.Checker
 	Limits    config.LimitsConfig
 	Media     config.MediaConfig
-	Audit     *audit.Logger // nil disables audit logging
-	StartTime time.Time     // when the server started; zero hides uptime
-	Health    HealthSource  // nil falls back to ping-only health
+	Audit     *audit.Logger            // nil disables audit logging
+	StartTime time.Time                // when the server started; zero hides uptime
+	Health    HealthSource             // nil falls back to ping-only health
+	PeerRL    *ratelimit.PerPeerLimiter // nil disables per-chat rate limiting
 }
 
 // recordAudit writes one entry to the audit log if configured. Extracts

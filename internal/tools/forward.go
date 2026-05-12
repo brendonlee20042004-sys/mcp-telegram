@@ -69,6 +69,10 @@ func handleForward(ctx context.Context, deps *Deps, input forwardInput) *mcp.Cal
 		return r
 	}
 
+	if err := deps.PeerRL.Wait(ctx, input.ToChat); err != nil {
+		return toolError(fmt.Sprintf("per-chat rate limit: %v", err))
+	}
+
 	if input.DryRun {
 		return dryRunResult(fmt.Sprintf("would forward %d message(s) from %s to %s",
 			len(ids), input.FromChat, input.ToChat))

@@ -68,6 +68,13 @@ func handleSend(ctx context.Context, deps *Deps, input sendInput) *mcp.CallToolR
 		return r
 	}
 
+	// Per-chat rate limit: blocks here if the LLM has been sending to this
+	// chat too fast. Global rate limit already wraps every RPC, but this
+	// catches per-peer bursts that don't exhaust the global budget.
+	if err := deps.PeerRL.Wait(ctx, input.Chat); err != nil {
+		return toolError(fmt.Sprintf("per-chat rate limit: %v", err))
+	}
+
 	var replyTo tg.InputReplyToClass
 	var replyToID int
 	if input.ReplyTo != "" {
