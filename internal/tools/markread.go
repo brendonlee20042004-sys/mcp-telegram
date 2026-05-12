@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/Prgebish/mcp-telegram/internal/config"
 	"github.com/gotd/td/tg"
@@ -23,7 +24,10 @@ func registerMarkRead(server *mcp.Server, deps *Deps) {
 			IdempotentHint:  true,
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input markReadInput) (*mcp.CallToolResult, any, error) {
-		return handleMarkRead(ctx, deps, input), nil, nil
+		start := time.Now()
+		result := handleMarkRead(ctx, deps, input)
+		recordAudit(deps, "tg_mark_read", input, start, result)
+		return result, nil, nil
 	})
 }
 

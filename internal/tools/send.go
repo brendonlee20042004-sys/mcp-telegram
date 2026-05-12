@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Prgebish/mcp-telegram/internal/config"
 	"github.com/gotd/td/telegram/uploader"
@@ -31,7 +32,10 @@ func registerSend(server *mcp.Server, deps *Deps) {
 			DestructiveHint: ptrBool(true),
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input sendInput) (*mcp.CallToolResult, any, error) {
-		return handleSend(ctx, deps, input), nil, nil
+		start := time.Now()
+		result := handleSend(ctx, deps, input)
+		recordAudit(deps, "tg_send", input, start, result)
+		return result, nil, nil
 	})
 }
 

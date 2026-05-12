@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/Prgebish/mcp-telegram/internal/config"
 	"github.com/gotd/td/tg"
@@ -24,7 +25,10 @@ func registerDraft(server *mcp.Server, deps *Deps) {
 			IdempotentHint:  true,
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input draftInput) (*mcp.CallToolResult, any, error) {
-		return handleDraft(ctx, deps, input), nil, nil
+		start := time.Now()
+		result := handleDraft(ctx, deps, input)
+		recordAudit(deps, "tg_draft", input, start, result)
+		return result, nil, nil
 	})
 }
 

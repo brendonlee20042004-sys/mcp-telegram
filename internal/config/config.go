@@ -71,8 +71,9 @@ func (m *MediaConfig) ShouldDownload(mediaType string) bool {
 }
 
 type LoggingConfig struct {
-	Level string `yaml:"level"`
-	File  string `yaml:"file"`
+	Level     string `yaml:"level"`
+	File      string `yaml:"file"`
+	AuditFile string `yaml:"audit_file"`
 }
 
 // LoadTelegram loads only the telegram section from config.
@@ -150,6 +151,12 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Logging.Level == "" {
 		cfg.Logging.Level = "info"
+	}
+	if cfg.Logging.File != "" {
+		cfg.Logging.File = expandTilde(cfg.Logging.File)
+	}
+	if cfg.Logging.AuditFile != "" {
+		cfg.Logging.AuditFile = expandTilde(cfg.Logging.AuditFile)
 	}
 	if cfg.Media.Directory != "" {
 		cfg.Media.Directory = expandTilde(cfg.Media.Directory)

@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/Prgebish/mcp-telegram/internal/acl"
+	"github.com/Prgebish/mcp-telegram/internal/audit"
 	"github.com/Prgebish/mcp-telegram/internal/config"
 	"github.com/Prgebish/mcp-telegram/internal/ratelimit"
 	tgclient "github.com/Prgebish/mcp-telegram/internal/telegram"
@@ -187,6 +188,16 @@ func runServe() {
 		os.Exit(1)
 	}
 
+	auditor, err := audit.New(cfg.Logging.AuditFile)
+	if err != nil {
+		logger.Error("failed to open audit log", "error", err)
+		os.Exit(1)
+	}
+	defer auditor.Close()
+	if auditor != nil {
+		logger.Info("audit log enabled", "path", cfg.Logging.AuditFile)
+	}
+
 	limiter := ratelimit.New(cfg.Limits.Rate)
 
 	client := tgclient.New(cfg.Telegram, limiter)
@@ -209,6 +220,7 @@ func runServe() {
 		ACL:      checker,
 		Limits:   cfg.Limits,
 		Media:    cfg.Media,
+		Audit:    auditor,
 	}
 	tools.Register(server, deps)
 
