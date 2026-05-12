@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/Prgebish/mcp-telegram/internal/acl"
 	"github.com/Prgebish/mcp-telegram/internal/audit"
@@ -215,12 +216,13 @@ func runServe() {
 	}, nil)
 
 	deps := &tools.Deps{
-		Resolver: &peerResolver{c: client},
-		API:      client.API(),
-		ACL:      checker,
-		Limits:   cfg.Limits,
-		Media:    cfg.Media,
-		Audit:    auditor,
+		Resolver:  &peerResolver{c: client},
+		API:       client.API(),
+		ACL:       checker,
+		Limits:    cfg.Limits,
+		Media:     cfg.Media,
+		Audit:     auditor,
+		StartTime: time.Now(),
 	}
 	tools.Register(server, deps)
 

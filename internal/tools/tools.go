@@ -31,12 +31,13 @@ type PeerResolver interface {
 
 // Deps holds all dependencies for tool handlers.
 type Deps struct {
-	Resolver PeerResolver
-	API      *tg.Client
-	ACL      *acl.Checker
-	Limits   config.LimitsConfig
-	Media    config.MediaConfig
-	Audit    *audit.Logger // nil disables audit logging
+	Resolver  PeerResolver
+	API       *tg.Client
+	ACL       *acl.Checker
+	Limits    config.LimitsConfig
+	Media     config.MediaConfig
+	Audit     *audit.Logger // nil disables audit logging
+	StartTime time.Time     // when the server started; zero hides uptime
 }
 
 // recordAudit writes one entry to the audit log if configured. Extracts
@@ -78,6 +79,7 @@ func Register(server *mcp.Server, deps *Deps) {
 	registerForward(server, deps)
 	registerDraft(server, deps)
 	registerMarkRead(server, deps)
+	registerHealth(server, deps)
 }
 
 func ptrBool(v bool) *bool {
